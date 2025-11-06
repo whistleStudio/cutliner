@@ -1,0 +1,25 @@
+ul {
+  font-size: 22px;
+  li {
+    display: flex;
+    align-items: center;
+    margin-bottom: 40px;
+    >span {
+      margin-left: 20px;
+    }
+    .ant-input-number-input-wrap {
+      font-size: 20px;
+    }
+    .ant-checkbox-inner {
+      width: 32px !important;
+      height: 32px !important;
+    }
+    .ant-checkbox-inner::after {
+      transform: rotate(45deg) scale(1.9) translate(-1px, -4px) !important ;
+    }
+    .ant-checkbox-label {
+      padding-right: 0 !important;
+      padding-left: 20px !important;
+    }
+  }
+}
