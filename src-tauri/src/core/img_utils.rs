@@ -1,7 +1,7 @@
 use opencv::{
     prelude::*,
     core::{self, Mat, Point, Scalar, Size, Vector},
-    imgcodecs, imgproc::{self, LINE_8}, Result,
+    imgcodecs, imgproc::{self, LINE_8}, Result, photo
 };
 // use super::io_control::pause_before_exit;
 // use std::fs;
@@ -173,10 +173,9 @@ pub fn get_otsu_threshold(image: &Mat) -> Result<f64> {
     Ok(threshold)
 }
 
-// 去背
-pub fn remove_background(mat: &Mat, contours: &Vector<Vector<Point>>) -> Result<Mat> {
-    let mut transparent_bg = Mat::new_size_with_default(mat.size()?, core::CV_8UC4, Scalar::all(0.0))?;
-    let mut mask = Mat::new_size_with_default(mat.size()?, core::CV_8UC1, Scalar::all(0.0))?;
+pub fn create_contours_filled_mask(binary_image: &Mat) -> Result<Mat> {
+    let contours = find_contours(binary_image, false)?;
+    let mut mask = Mat::new_size_with_default(binary_image.size()?, core::CV_8UC1, Scalar::all(0.0))?;
     // 创建一个临时的 Vector<Vector<Point>>，每次只放一个轮廓
     let mut single_contour_vec = Vector::<Vector<Point>>::new();
     for contour in contours.iter() {
@@ -193,13 +192,43 @@ pub fn remove_background(mat: &Mat, contours: &Vector<Vector<Point>>) -> Result<
             0,
             Point::new(0, 0)
         )?;
+    };
+    Ok(mask)
+}
+
+// 去背
+pub fn remove_background(mat: &Mat, img_binary: &Mat, is_delete_inner: bool) -> Result<Mat> {
+    let mut transparent_bg = Mat::new_size_with_default(mat.size()?, core::CV_8UC4, Scalar::all(0.0))?;
+    let mut bgra = Mat::default();
+    imgproc::cvt_color(mat, &mut bgra, imgproc::COLOR_BGR2BGRA, 0)?;
+    if is_delete_inner {
+        // 删除内轮廓时，直接使用二值图作为掩码; 使用掩码复制 RGB 部分
+        bgra.copy_to_masked(&mut transparent_bg, &img_binary)?;
+    } else {
+        let mask = create_contours_filled_mask(img_binary)?;
+        // 使用掩码复制 RGB 部分
+        bgra.copy_to_masked(&mut transparent_bg, &mask)?;
     }
-    // 将原图转成 4 通道（BGRA）
-    let mut bgra = Mat::new_size_with_default(mat.size()?, core::CV_8UC4, Scalar::all(0.0))?;
-    imgproc::cvt_color(&mat, &mut bgra, imgproc::COLOR_BGR2BGRA, 0)?;
-
-    // 使用掩码复制 RGB 部分
-    bgra.copy_to_masked(&mut transparent_bg, &mask)?;
-
     Ok(transparent_bg)
 }
+
+// 出血
+pub fn bleed_edges(src_image: &Mat, img_binary: &Mat, expand_pixels: i32) -> Result<Mat> {
+    // 1. 原始轮廓
+    let original_mask = create_contours_filled_mask(img_binary)?;
+    let expanded_mask = dilate_mask(&original_mask, expand_pixels)?;
+    // 3. 出血掩码
+    let mut bleed_mask = Mat::default();
+    core::subtract(&expanded_mask, &original_mask, &mut bleed_mask, &core::no_array(), -1)?;
+    // 4. 修复
+    let mut bleeded_image = Mat::default();
+    photo::inpaint(
+        &src_image,
+        &bleed_mask,
+        &mut bleeded_image,
+        1.0,
+        photo::INPAINT_TELEA,
+    )?;
+    Ok(bleeded_image)
+}
+

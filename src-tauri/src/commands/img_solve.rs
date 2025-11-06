@@ -34,14 +34,19 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<Vec<u8>, String> {
         println!("Received mode: {:?}, cfgs: {:?}", mode, cfgs);
         let src_data = SRC_DATA.lock().unwrap().as_ref().unwrap().clone();
         // ...处理图像...
-        let img_original = img_utils::load_image(&src_data).map_err(|e| e.to_string())?;
-        let img_binary = img_utils::to_binary(&img_original, cfgs.threshold as f64).map_err(|e| e.to_string())?;
+        let mut img_original = img_utils::load_image(&src_data).map_err(|e| e.to_string())?;
+        let mut img_binary = img_utils::to_binary(&img_original, cfgs.threshold as f64).map_err(|e| e.to_string())?;
         match mode {
             Mode::BgRemove => {
+                if cfgs.bleed > 0 {
+                    img_original = img_utils::bleed_edges(&img_original, &img_binary, cfgs.bleed as i32).map_err(|e| e.to_string())?;
+                    img_binary = img_utils::to_binary(&img_original, cfgs.threshold as f64).map_err(|e| e.to_string())?;
+                }
+                img_utils::remove_background(&img_original, &img_binary, cfgs.is_delete_inner > 0).map_err(|e| e.to_string())?;
                 // 执行背景移除逻辑
-                let contours = img_utils::find_contours(&img_binary, cfgs.is_delete_inner == 1).map_err(|e| e.to_string())?;
-                let img_final = img_utils::remove_background(&img_original, &contours).map_err(|e| e.to_string())?;
-                assert_eq!(img_final.channels(), 4, "错误：尝试编码一个非4通道的图像作为透明PNG！");
+                let img_final = img_utils::remove_background(&img_original, &img_binary, cfgs.is_delete_inner > 0).map_err(|e| e.to_string())?;
+                // assert_eq!(img_final.channels(), 4, "错误：尝试编码一个非4通道的图像作为透明PNG！");
+
                 Ok(img_utils::mat_to_encoded_vec(&img_final).map_err(|e| e.to_string())?)
             },
             Mode::ContourOuter | Mode::ContourAll => {
