@@ -55,8 +55,8 @@ export default function CfgMenu() {
   const handlePreview = async () => {
     // console.log("Previewing with settings:", cfgs);
     try {
-      const res = await invoke<Uint8Array>('solve', {mode: selectedMode, cfgs});
-      emit('imgData-changed', res);
+      const res = await invoke<string>('solve', {mode: selectedMode, cfgs});
+      emit('img-changed', res);
     } catch (err) {
       console.error("Error during preview:", err);
     }

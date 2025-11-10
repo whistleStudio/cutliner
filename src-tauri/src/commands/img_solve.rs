@@ -1,10 +1,13 @@
-use super::file::SRC_DATA;
+use super::file::{SRC_DATA, SRC_STEM};
 use crate::core::img_utils;
 use opencv::{
     prelude::*,
     Result, 
     core::{CV_8UC1, CV_8UC3} 
 };
+use uuid::Uuid;
+use crate::commands::file::{IMAGE_SIZE, CONTOURS};
+
 
 #[allow(dead_code)]
 #[derive(serde::Deserialize, Debug)]
@@ -29,13 +32,22 @@ pub enum Mode {
 }
 
 #[tauri::command]
-pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<Vec<u8>, String> {
-    let res = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<String, String> {
+    let res = tokio::task::spawn_blocking(move || -> Result<String, String> {
         println!("Received mode: {:?}, cfgs: {:?}", mode, cfgs);
         let src_data = SRC_DATA.lock().unwrap().as_ref().unwrap().clone();
-        // ...处理图像...
+        let src_stem = SRC_STEM.lock().unwrap();
+        let file_uuid = Uuid::new_v4();
+        let temp_file_name = format!("temp_{}.png", file_uuid);
+        let file_name = src_stem.as_ref().unwrap().clone();
+        /* 处理图像 */
         let mut img_original = img_utils::load_image(&src_data).map_err(|e| e.to_string())?;
         let mut img_binary = img_utils::to_binary(&img_original, cfgs.threshold as f64).map_err(|e| e.to_string())?;
+        // 设置当前图片尺寸
+        {
+            let mut img_size = IMAGE_SIZE.lock().unwrap();
+            *img_size = (img_original.cols(), img_original.rows());
+        }
         match mode {
             Mode::BgRemove => {
                 if cfgs.bleed > 0 {
@@ -46,8 +58,13 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<Vec<u8>, String> {
                 // 执行背景移除逻辑
                 let img_final = img_utils::remove_background(&img_original, &img_binary, cfgs.is_delete_inner > 0).map_err(|e| e.to_string())?;
                 // assert_eq!(img_final.channels(), 4, "错误：尝试编码一个非4通道的图像作为透明PNG！");
-
-                Ok(img_utils::mat_to_encoded_vec(&img_final).map_err(|e| e.to_string())?)
+                let temp_file_path = img_utils::export_temp_image(&file_name, &img_final).map_err(|e| e.to_string())?;
+                // 去背处理不提取轮廓，预览生成后，清空轮廓数
+                {
+                    let mut stored_contours = CONTOURS.lock().unwrap();
+                    *stored_contours = None;
+                }
+                Ok(temp_file_path)
             },
             Mode::ContourOuter | Mode::ContourAll => {
                 // 外轮廓描绘逻辑 平滑+膨胀（偏移）+获取轮廓+简化
@@ -78,6 +95,10 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<Vec<u8>, String> {
                 } else {
                     contours
                 };
+                {
+                    let mut stored_contours = CONTOURS.lock().unwrap();
+                    *stored_contours = Some(contours_simplified.clone());
+                }
                 let img_final = img_utils::draw_contours_on_mask(
                     img_original.size().map_err(|e| e.to_string())?,
                     CV_8UC3,
@@ -86,7 +107,9 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<Vec<u8>, String> {
                     opencv::core::Scalar::all(0.0),
                     1
                 ).map_err(|e| e.to_string())?;
-                Ok(img_utils::mat_to_encoded_vec(&img_final).map_err(|e| e.to_string())?)
+                // Ok(img_utils::mat_to_encoded_vec(&img_final).map_err(|e| e.to_string())?)
+                let temp_file_path = img_utils::export_temp_image(&temp_file_name, &img_final).map_err(|e| e.to_string())?;
+                Ok(temp_file_path)
             }
             // Mode::ContourAll => {
             //     // 执行所有轮廓描绘逻辑

@@ -5,7 +5,8 @@ use opencv::{
 };
 // use super::io_control::pause_before_exit;
 // use std::fs;
-
+use uuid::Uuid;
+use crate::commands::file::CURRENT_PATH;
 
 /* 加载图片 */
 pub fn load_image(src_data: &Vec<u8>) -> Result<Mat> {
@@ -28,10 +29,26 @@ pub fn load_image(src_data: &Vec<u8>) -> Result<Mat> {
 }
 
 /* 导出图片 */
-pub fn save_image(path: &str, image: &Mat) -> Result<()> {
-    imgcodecs::imwrite(path, image, &Vector::new())?;
-    println!("图片已保存到 {}", path);
-    Ok(())
+pub fn export_temp_image(real_file_name: &str, image: &Mat) -> Result<String> {
+    let mut temp_path = std::env::temp_dir();
+    temp_path.push("cutliner");
+    if !temp_path.exists() {
+        if let Err(e) = std::fs::create_dir_all(&temp_path) {
+            return Err(opencv::Error::new(-1, &format!("无法创建临时文件目录: {}", e)));
+        }
+    }
+    let mut real_path = temp_path.clone();
+    let file_uuid = Uuid::new_v4();
+    let temp_file_path = format!("temp_{}.png", file_uuid);
+    temp_path.push(temp_file_path);
+    let real_file_path = format!("{}_{}.png", real_file_name, file_uuid);
+    real_path.push(real_file_path);
+    imgcodecs::imwrite(&temp_path.to_string_lossy().to_string(), image, &Vector::new())?;
+    println!("图片已保存到 {}", temp_path.to_string_lossy().to_string());
+    std::fs::rename(&temp_path, &real_path).map_err(|e| opencv::Error::new(-1, &format!("无法重命名临时文件: {}", e)))?;
+    let mut current_path = CURRENT_PATH.lock().unwrap(); // 更新待保存的文件路径
+    *current_path = Some(real_path.to_string_lossy().to_string());
+    Ok(real_path.to_string_lossy().to_string())
 }
 
 
@@ -212,18 +229,20 @@ pub fn remove_background(mat: &Mat, img_binary: &Mat, is_delete_inner: bool) -> 
     Ok(transparent_bg)
 }
 
-// 出血
+/* 出血 */
 pub fn bleed_edges(src_image: &Mat, img_binary: &Mat, expand_pixels: i32) -> Result<Mat> {
     // 1. 原始轮廓
     let original_mask = create_contours_filled_mask(img_binary)?;
     let expanded_mask = dilate_mask(&original_mask, expand_pixels)?;
+    let mut white_bg = Mat::new_size_with_default(src_image.size()?, core::CV_8UC3, Scalar::all(255.0))?;
+    src_image.copy_to_masked(&mut white_bg, &original_mask)?;
     // 3. 出血掩码
     let mut bleed_mask = Mat::default();
     core::subtract(&expanded_mask, &original_mask, &mut bleed_mask, &core::no_array(), -1)?;
     // 4. 修复
     let mut bleeded_image = Mat::default();
     photo::inpaint(
-        &src_image,
+        &white_bg,
         &bleed_mask,
         &mut bleeded_image,
         1.0,
@@ -232,3 +251,30 @@ pub fn bleed_edges(src_image: &Mat, img_binary: &Mat, expand_pixels: i32) -> Res
     Ok(bleeded_image)
 }
 
+/* 构建svg */
+pub fn build_svg_from_contours(contours: &Vector<Vector<Point>>, img_width: i32, img_height: i32) -> String {
+    let mut svg_data = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
+        img_width, img_height, img_width, img_height
+    );
+    for contour in contours.iter() {
+        if contour.len() < 2 {
+            continue; // 忽略点数过少的轮廓
+        }
+        let mut path_data = String::new();
+        for (i, point) in contour.iter().enumerate() {
+            if i == 0 {
+                path_data += &format!("M {} {}", point.x, point.y);
+            } else {
+                path_data += &format!(" L {} {}", point.x, point.y);
+            }
+        }
+        path_data += " Z"; // 闭合路径
+        svg_data += &format!(
+            r#"<path d="{}" fill="none" stroke="black" stroke-width="1"/>"#,
+            path_data
+        );
+    }
+    svg_data += "</svg>";
+    svg_data
+}
