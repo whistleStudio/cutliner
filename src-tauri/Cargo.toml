@@ -27,4 +27,6 @@ base64 = "0.22.1"
 opencv = { version = "0.96.0", default-features = false, features = ["imgproc", "imgcodecs", "photo"] }
 tokio = "1.48.0"
 uuid = { version = "1", features = ["v4"] }
+tauri-plugin-shell = "2"
+
 

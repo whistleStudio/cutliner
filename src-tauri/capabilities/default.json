@@ -8,6 +8,24 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "dialog:default"
+    "dialog:default",
+    "shell:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "bin/svg2dxf",
+          "sidecar": true,
+          "args": [
+            {
+              "validator": "^.+\\.svg$"
+            }, 
+            {
+              "validator": "^.+\\.dxf$"
+            }
+          ]
+        }
+      ]
+    }
   ]
 }

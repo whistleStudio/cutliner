@@ -23,3 +23,20 @@ ul {
     }
   }
 }
+
+.logo {
+  opacity: 0.5;
+  cursor: pointer;
+  &:hover {
+    animation: show-logo 0.3s ease-in-out forwards;
+    @keyframes show-logo {
+      0% {
+        opacity: 0.5;
+      }
+      100% {
+        opacity: 1;
+      }
+    }
+  }
+
+}

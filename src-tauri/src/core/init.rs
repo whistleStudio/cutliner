@@ -1,7 +1,6 @@
+use crate::commands::file::{SRC_DATA, SRC_STEM};
 use tauri::path::BaseDirectory;
 use tauri::{Emitter, Manager};
-use crate::commands::file::{SRC_DATA, SRC_STEM};
-
 
 pub fn ready(app: &tauri::AppHandle, img_name: &str) {
     // 获取资源根目录（在 dev 模式下是 src-tauri/assets，打包后是应用内部资源目录）
@@ -17,5 +16,8 @@ pub fn ready(app: &tauri::AppHandle, img_name: &str) {
 
     let _ = app.emit("img-changed", resource_path.to_str().unwrap());
 
-    println!("Initialized with default resource_path: {}", resource_path.to_string_lossy().to_string());
+    println!(
+        "Initialized with default resource_path: {}",
+        resource_path.to_string_lossy().to_string()
+    );
 }

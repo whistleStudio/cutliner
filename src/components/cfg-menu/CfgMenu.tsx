@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import type { InputNumberProps } from 'antd';
 import { InputNumber, Radio, Checkbox, Button } from 'antd';
 // import type { CheckboxGroupProps } from 'antd/es/checkbox';
 import { invoke } from '@tauri-apps/api/core';
@@ -114,8 +113,9 @@ export default function CfgMenu() {
           </li>
         )
       }
-      <li style={{width: "100%", marginTop: "auto", marginBottom: "7px"}}>
-        <Button color='cyan' variant="solid" size='large' style={{width: "100%"}} onClick={handlePreview}>预览</Button>
+      <li style={{width: "100%", marginTop: "auto", marginBottom: "7px", flexDirection: "column", alignItems: "flex-end"}}>
+        <img  className="logo" src="/icon.png" alt="cut cut~" height={150}/>
+        <Button color='cyan' variant="solid" size='large' style={{width: "100%", marginTop: "50px"}} onClick={handlePreview}>预览</Button>
       </li>
     </ul>
   );
