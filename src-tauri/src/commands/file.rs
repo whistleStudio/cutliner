@@ -6,6 +6,7 @@ use tauri::path::BaseDirectory;
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
+use tokio::time;
 
 pub static SRC_DATA: LazyLock<Mutex<Option<Vec<u8>>>> = LazyLock::new(|| Mutex::new(None)); // 图片源数据 (上传时记录以便多次处理)
 pub static SRC_STEM: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None)); // 图片文件名（不含扩展名）
@@ -14,7 +15,7 @@ pub static IMAGE_SIZE: LazyLock<Mutex<(i32, i32)>> = LazyLock::new(|| Mutex::new
 pub static CONTOURS: LazyLock<Mutex<Option<Vector<Vector<Point>>>>> = LazyLock::new(|| Mutex::new(None)); // 轮廓数据 (用于保存svg)
 
 #[tauri::command]
-pub fn init(app: tauri::AppHandle, img_name_with_ext: &str) {
+pub async fn init(app: tauri::AppHandle, img_name_with_ext: String) {
     // 获取资源根目录（在 dev 模式下是 src-tauri/assets，打包后是应用内部资源目录）
     let resource_path = app
         .path()
@@ -24,9 +25,12 @@ pub fn init(app: tauri::AppHandle, img_name_with_ext: &str) {
         )
         .expect("failed to resolve resource path");
     let image_data = std::fs::read(resource_path.to_string_lossy().to_string()).unwrap_or_default();
-    let mut src_data = SRC_DATA.lock().unwrap();
-    *src_data = Some(image_data.clone());
+    {
+        let mut src_data = SRC_DATA.lock().unwrap();
+        *src_data = Some(image_data.clone());
+    }
     let path_str = resource_path.to_string_lossy().to_string();
+    time::sleep(time::Duration::from_micros(200)).await; // 等待前端监听准备就绪
     let _ = app.emit("img-changed", &path_str);
     let mut current_path = CURRENT_PATH.lock().unwrap();
     *current_path = Some(path_str.clone());
@@ -57,8 +61,14 @@ pub async fn select_image(app: tauri::AppHandle) -> Result<(Option<String>, f64)
             // *path_str = Some(path_buf.to_string());
             // let path_str = path_str.as_ref().ok_or("没有选择文件")?;
             let image_data = fs::read(path_buf.to_string()).map_err(|e| e.to_string())?;
-            let mut src_data = SRC_DATA.lock().unwrap();
-            *src_data = Some(image_data.clone());
+            { // 初次更改，若为4通道，后续在load_image时会处理
+                let mut src_data = SRC_DATA.lock().unwrap();
+                *src_data = Some(image_data.clone());
+            }
+            let img_original = img_utils::load_image(&image_data).map_err(|e| e.to_string())?;
+
+            // let mut src_data = SRC_DATA.lock().unwrap();
+            // *src_data = Some(image_data.clone());
             let path_str = path_buf.to_string();
             // 写入临时文件目录 C:\Users\<用户名>\AppData\Local\Temp\cutliner
             let ext = std::path::Path::new(&path_str)
@@ -90,7 +100,6 @@ pub async fn select_image(app: tauri::AppHandle) -> Result<(Option<String>, f64)
                 let mut current_path = CURRENT_PATH.lock().unwrap();
                 *current_path = Some(temp_path_str.clone());
             }
-            let img_original = img_utils::load_image(&image_data).map_err(|e| e.to_string())?;
             let otsu_threshold =
                 img_utils::get_otsu_threshold(&img_original).map_err(|e| e.to_string())?;
             // 重新选择新图片时，清空之前的轮廓数据
@@ -141,7 +150,7 @@ pub async fn save_image(app: tauri::AppHandle) -> Result<(), String> {
             let svg_data = generate_svg_data()?;
             fs::write(&svg_path, svg_data).map_err(|e| e.to_string())?;
             // 调用外部工具 svg2dxf 进行转换
-            img_utils::convert_svg_to_dxf(app, &svg_path.to_string_lossy(), &target_path)?;
+            img_utils::convert_svg_to_dxf(&app, &svg_path.to_string_lossy(), &target_path)?;
             // img_utils::generate_dxf_from_contours_r12_compatible(&contours, &target_path).map_err(|e| e.to_string())?;
         } else {
             if target_ext == "" {
@@ -153,7 +162,7 @@ pub async fn save_image(app: tauri::AppHandle) -> Result<(), String> {
             fs::copy(&source_path, &target_path).map_err(|e| e.to_string())?;
         }
     }
-
+    // app.emit("save-ok", "").map_err(|e|e.to_string())?;
     Ok(())
 }
 

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use opencv::{
     core::{self, Mat, Point, Scalar, Size, Vector},
-    imgcodecs,
+    imgcodecs::{self, IMWRITE_PNG_COMPRESSION},
     imgproc::{self, LINE_8},
     photo,
     prelude::*,
@@ -10,44 +10,45 @@ use opencv::{
 };
 // use super::io_control::pause_before_exit;
 // use std::fs;
-use crate::commands::file::CURRENT_PATH;
+use crate::commands::file::{CURRENT_PATH, SRC_DATA};
 use tauri_plugin_shell::ShellExt;
 use uuid::Uuid;
 
 /* 加载图片 */
 pub fn load_image(src_data: &Vec<u8>) -> Result<Mat> {
-    // let image = imgcodecs::imread(path, imgcodecs::IMREAD_COLOR)?;
-    // if image.empty() {
-    //     eprintln!("错误：无法加载图片，请检查路径是否正确。");
-    //     pause_before_exit();
-    //     Err(opencv::Error::new(-1, "无法加载图片"))
-    // } else {
-    //     Ok(image)
-    // }
-    // let buf = fs::read(path).map_err(|e| opencv::Error::new(-1, &format!("无法读取图片文件: {}", e)))?;
-    let data = Vector::from_slice(src_data);
-    let image = imgcodecs::imdecode(&data, imgcodecs::IMREAD_COLOR)?;
-    if image.empty() {
-        Err(opencv::Error::new(-1, "无法加载图片"))
-    } else {
-        Ok(image)
+    // 1. 保留 alpha 读取
+    let img = imgcodecs::imdecode(&Vector::from_slice(src_data), imgcodecs::IMREAD_UNCHANGED)?;
+    if img.empty() {
+        return Err(opencv::Error::new(-1, "无法加载图片"));
     }
+    // 2. 创建白色背景
+    let mut white_bg = Mat::new_size_with_default(img.size()?, opencv::core::CV_8UC3, Scalar::all(255.0))?;
+    // 3. 如果原图带 alpha
+    if img.channels() == 4 {
+        let mut channels = Vector::<Mat>::new();
+        opencv::core::split(&img, &mut channels)?;
+        let a = channels.get(3)?;
+        let mut mask = Mat::default(); // 建立 alpha 掩码
+        imgproc::threshold(&a, &mut mask, 0.0, 255.0, imgproc::THRESH_BINARY)?; // alpha>0 的地方为 255
+        let mut img_bgr = Mat::default();
+        opencv::imgproc::cvt_color(&img, &mut img_bgr, opencv::imgproc::COLOR_BGRA2BGR, 0)?;
+        img_bgr.copy_to_masked(&mut white_bg, &mask)?; // 白色覆盖掩码
+        let mut buf = Vector::new();
+        imgcodecs::imencode(".png", &white_bg, &mut buf, &Vector::from_slice(&[IMWRITE_PNG_COMPRESSION, 3]))?;
+        {
+            let mut src_data = SRC_DATA.lock().unwrap();
+            // 更新 SRC_DATA 为去背后的图片数据
+            *src_data = Some(buf.to_vec());
+        }
+    } else {
+        img.copy_to(&mut white_bg)?;
+    }
+
+    Ok(white_bg)
 }
 
 /* 导出图片 */
 pub fn export_temp_image(real_file_name: &str, image: &Mat) -> Result<String> {
-    // let mut temp_path = std::env::temp_dir();
-    // temp_path.push("cutliner");
-    // if !temp_path.exists() {
-    //     if let Err(e) = std::fs::create_dir_all(&temp_path) {
-    //         return Err(opencv::Error::new(-1, &format!("无法创建临时文件目录: {}", e)));
-    //     }
-    // }
-    // let mut real_path = temp_path.clone();
-    // let file_uuid = Uuid::new_v4();
-    // let temp_file_path = format!("temp_{}.png", file_uuid);
-    // temp_path.push(temp_file_path);
-    // let real_file_path = format!("{}_{}.png", real_file_name, file_uuid);
     let (mut real_path, temp_path) = generate_temp_dir_file("png");
     let file_uuid = Uuid::new_v4();
     let real_file_path = format!("{}_{}.png", real_file_name, file_uuid);
@@ -228,12 +229,16 @@ pub fn simplify_contours(
     Ok(simplified_contours)
 }
 
-// 编码
-pub fn mat_to_encoded_vec(mat: &Mat) -> opencv::Result<Vec<u8>> {
-    let mut buf = Vector::<u8>::new();
-    imgcodecs::imencode(".png", mat, &mut buf, &Vector::new())?;
-    Ok(buf.to_vec())
+/* 简化轮廓（传binary） */
+pub fn simplify_contours_from_binary(
+    binary_image: &Mat,
+    epsilon_factor: f64,
+) -> Result<Mat> {
+    let contours = find_contours(binary_image, false)?; // 需要获得有填充的mask,带孔不好填；后续去背带颜色，挖空单纯用二值化阈值挖
+    let simplified_contours = simplify_contours(&contours, epsilon_factor)?;
+    Ok(create_contours_filled_mask_by_contours(&simplified_contours, binary_image.size()?)?)
 }
+
 
 // Otsu参考阈值
 pub fn get_otsu_threshold(image: &Mat) -> Result<f64> {
@@ -251,8 +256,11 @@ pub fn get_otsu_threshold(image: &Mat) -> Result<f64> {
 
 pub fn create_contours_filled_mask(binary_image: &Mat) -> Result<Mat> {
     let contours = find_contours(binary_image, false)?;
-    let mut mask =
-        Mat::new_size_with_default(binary_image.size()?, core::CV_8UC1, Scalar::all(0.0))?;
+    create_contours_filled_mask_by_contours(&contours, binary_image.size()?)
+}
+
+fn create_contours_filled_mask_by_contours(contours: &Vector<Vector<Point>>, img_size: Size) -> Result<Mat> {
+    let mut mask = Mat::new_size_with_default(img_size, core::CV_8UC1, Scalar::all(0.0))?;
     // 创建一个临时的 Vector<Vector<Point>>，每次只放一个轮廓
     let mut single_contour_vec = Vector::<Vector<Point>>::new();
     for contour in contours.iter() {
@@ -291,23 +299,77 @@ pub fn remove_background(mat: &Mat, img_binary: &Mat, is_delete_inner: bool) -> 
 }
 
 /* 出血 */
-pub fn bleed_edges(src_image: &Mat, img_binary: &Mat, expand_pixels: i32) -> Result<Mat> {
-    // 1. 原始轮廓
+pub fn bleed_edges(src_image: &mut Mat, img_binary: &Mat, expand_pixels: i32) -> Result<Mat> {
+    const MAX_DIAGONAL: f64 = 2000.0; // 最大对角线长度
+    let original_size = src_image.size()?;
+    let (width, height) = (original_size.width as f64, original_size.height as f64);
+    let diagonal = (width.powi(2) + height.powi(2)).sqrt();
+    let scale = (MAX_DIAGONAL / diagonal).min(1.0); // 计算缩放因子，最大为1.0
+    println!("Original size: {:?}, diagonal: {}, scale: {}", original_size, diagonal, scale);
+    if scale < 1.0 {
+        let original_mask = create_contours_filled_mask(img_binary)?;
+        // let expanded_mask = dilate_mask(&original_mask, expand_pixels)?;
+        let mut obj_on_white_bg = Mat::new_size_with_default(src_image.size()?, core::CV_8UC3, Scalar::all(255.0))?;
+        src_image.copy_to_masked(&mut obj_on_white_bg, &original_mask)?;
+
+        // 2. 创建一个稍大的画布，用于容纳平移后的图像
+        let bleed_canvas_size = Size::new(original_size.width + expand_pixels * 2, original_size.height + expand_pixels * 2);
+        let mut bleed_canvas = Mat::new_size_with_default(bleed_canvas_size, opencv::core::CV_8UC3, Scalar::all(255.0))?;
+
+        // 3. 定义8个方向的平移
+        let offsets = [
+            (-expand_pixels, -expand_pixels), (0, -expand_pixels), (expand_pixels, -expand_pixels),
+            (-expand_pixels, 0),                                     (expand_pixels, 0),
+            (-expand_pixels, expand_pixels),  (0, expand_pixels),  (expand_pixels, expand_pixels),
+        ];
+
+        // 4. 将8个方向的平移图像依次“画”在画布上
+        for (dx, dy) in offsets.iter() {
+            let roi_rect = core::Rect::new(
+                *dx + expand_pixels,
+                *dy + expand_pixels,
+                original_size.width,
+                original_size.height,
+            );
+        
+            // 获取画布上对应区域
+            let mut target_roi = Mat::roi_mut(&mut bleed_canvas, roi_rect)?;
+            obj_on_white_bg.copy_to_masked(&mut target_roi, &original_mask)?;
+        }
+        // 5. 将原始、清晰的物体叠加在最顶层
+        let center_rect = core::Rect::new(expand_pixels, expand_pixels, original_size.width, original_size.height);
+        let mut target_center_roi = Mat::roi_mut(&mut bleed_canvas, center_rect)?;
+        obj_on_white_bg.copy_to_masked(&mut target_center_roi, &original_mask)?;
+
+        // 6. 将大画布裁剪回原始尺寸，并转换为BGR
+        // let final_bleeded_bgra = bleed_canvas.roi(core::Rect::new(expand_pixels, expand_pixels, original_size.width, original_size.height))?;
+        // let mut final_bgr = Mat::default();
+        // imgproc::cvt_color(&final_bleeded_bgra, &mut final_bgr, imgproc::COLOR_BGRA2BGR, 0)?;
+        let mut result = Mat::default();
+        bleed_canvas.roi(center_rect)?.copy_to(&mut result)?;
+
+        // target_center_roi.copy_to(&mut white_bg)?;
+        Ok(result)
+    } else {
+        Ok(generate_bleed_image(src_image, img_binary, expand_pixels)?.0)
+    }
+}
+
+// 出血图像生成
+fn generate_bleed_image(src_image: &Mat, img_binary: &Mat, expand_pixels: i32) -> Result<(Mat, Mat)> {
     let original_mask = create_contours_filled_mask(img_binary)?;
     let expanded_mask = dilate_mask(&original_mask, expand_pixels)?;
     let mut white_bg =
         Mat::new_size_with_default(src_image.size()?, core::CV_8UC3, Scalar::all(255.0))?;
     src_image.copy_to_masked(&mut white_bg, &original_mask)?;
-    // 3. 出血掩码
     let mut bleed_mask = Mat::default();
-    core::subtract(
+    core::subtract( //src1 - src2
         &expanded_mask,
         &original_mask,
         &mut bleed_mask,
         &core::no_array(),
         -1,
     )?;
-    // 4. 修复
     let mut bleeded_image = Mat::default();
     photo::inpaint(
         &white_bg,
@@ -316,8 +378,9 @@ pub fn bleed_edges(src_image: &Mat, img_binary: &Mat, expand_pixels: i32) -> Res
         1.0,
         photo::INPAINT_TELEA,
     )?;
-    Ok(bleeded_image)
+    Ok((bleeded_image, bleed_mask))
 }
+
 
 /* 构建svg */
 pub fn build_svg_from_contours(
@@ -352,7 +415,7 @@ pub fn build_svg_from_contours(
 }
 
 /* svg转dxf */
-pub fn convert_svg_to_dxf( app: tauri::AppHandle, src_path: &str, target_path: &str) -> Result<(), String> {
+pub fn convert_svg_to_dxf( app: &tauri::AppHandle, src_path: &str, target_path: &str) -> Result<(), String> {
     let sidecar_cmd = app
         .shell()
         .sidecar("svg2dxf")

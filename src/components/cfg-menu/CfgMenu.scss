@@ -38,5 +38,16 @@ ul {
       }
     }
   }
+}
 
+.cut {
+  animation: show-logo 0.5s ease-in-out forwards;
+  @keyframes show-logo {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
 }

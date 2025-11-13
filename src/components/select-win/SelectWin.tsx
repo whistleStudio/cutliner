@@ -11,18 +11,25 @@ export default function SelectWin() {
   const [SelectImgSrc, setSelectImgSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    let unlisten: () => void;
+    let unlistenArr: Array<() => void> = [];
     const dataListener =  async () => {
-      unlisten = await listen<string>('img-changed', event => {
+      unlistenArr.push(await listen<string>('img-changed', event => {
         // setImg(event.payload);
         console.log("Converted image source:", event.payload, convertFileSrc(event.payload));
         setSelectImgSrc(convertFileSrc(event.payload));
-      });
+      }));
     };
     dataListener();
-    invoke('init', { imgNameWithExt: "input.jpg" }); // 初始化应用内包含的测试默认图片
+    invoke('init', { imgNameWithExt: "demo.jpg" }); // ⭐初始化应用内包含的测试默认图片
+    // 微调：修改图片preview为中文
+    const previewDiv = document.querySelector(".ant-image-mask-info");
+    const previewTextEl = previewDiv?.childNodes[previewDiv?.childNodes.length - 1] as HTMLElement | undefined;
+    if (previewTextEl) {
+      previewTextEl.textContent = "预览";
+    }
+
     return () => {
-      if (unlisten) { unlisten(); }
+      if (unlistenArr.length > 0) { unlistenArr.forEach(unlisten => unlisten()); }
     };
   }, []);
   
@@ -36,26 +43,26 @@ export default function SelectWin() {
         setSelectImgSrc(convertFileSrc(imageSrc));
         emit('set-otsu-threshold', otsuThreshold);
       }
-    } catch (err) { console.error("Error selecting image:", err); }
+    } catch (err) { console.error("Error selecting image:", err); alert("图片上传失败"); }
   };
 
   /* 保存图片 */
   const handleSaveImage = async () => {
     try {
       await invoke('save_image');
-    } catch (err) { console.error("Error saving image:", err); }
+    } catch (err) { console.error("Error saving image:", err); alert("图片保存失败"); }
   };
 
   return (
     <div className="flex-col-align-center" style={{width: '70%', height: '100%', marginRight: "5px", borderRight: "1px solid #eee"}}>
-      <Image height={720} src={SelectImgSrc || convertFileSrc("")} className="preview-container"/>
+      <Image height={720} style={{objectFit: "contain"}} src={SelectImgSrc || convertFileSrc("")} className="preview-container"/>
       <div className="flex-row-align-center" style={{width: "60%", justifyContent: "space-evenly"}}>
-        <Button icon={<UploadOutlined />} onClick={handleSelectImage}
+        <Button icon={<UploadOutlined />} onClick={handleSelectImage} className="btn"
         style={{marginTop: "20px", fontSize: "20px", lineHeight: "40px", width: "30%"}}
-        >Upload</Button>
-        <Button icon={<DownloadOutlined />} onClick={handleSaveImage}
+        >上传</Button>
+        <Button icon={<DownloadOutlined />} onClick={handleSaveImage} className="btn"
         style={{marginTop: "20px", fontSize: "20px", lineHeight: "40px", width: "30%"}}
-        >Save</Button>
+        >保存</Button>
       </div>
 
 

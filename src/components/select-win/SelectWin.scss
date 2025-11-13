@@ -12,3 +12,10 @@
   /* background-color: #f0f0f0; */
   border: 1px solid #ddd;
 }
+
+.btn {
+  &:hover {
+    border-color: #6dad56ff !important;
+    color: #6dad56ff !important;
+  }
+}

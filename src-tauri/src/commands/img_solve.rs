@@ -2,7 +2,7 @@ use super::file::{SRC_DATA, SRC_STEM};
 use crate::commands::file::{CONTOURS, IMAGE_SIZE};
 use crate::core::img_utils;
 use opencv::{
-    core::{CV_8UC1, CV_8UC3},
+    core::{CV_8UC3},
     prelude::*,
     Result,
 };
@@ -13,13 +13,13 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 pub struct ImgSolveCfgs {
     // Add fields as necessary
-    threshold: u8,
-    bleed: u8,
+    threshold: f64,
+    bleed: i32,
     is_delete_inner: u8,
-    smooth: u8,
-    offset: u8,
-    simplify: u8,
-    fill_holes: u8,
+    smooth: i32,
+    offset: i32,
+    simplify: i32,
+    fill_holes: i32,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -41,24 +41,34 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<String, String> {
         let file_name = src_stem.as_ref().unwrap().clone();
         /* 处理图像 */
         let mut img_original = img_utils::load_image(&src_data).map_err(|e| e.to_string())?;
-        let mut img_binary = img_utils::to_binary(&img_original, cfgs.threshold as f64)
+        let mut img_binary = img_utils::to_binary(&img_original, cfgs.threshold)
             .map_err(|e| e.to_string())?;
         // 设置当前图片尺寸
         {
             let mut img_size = IMAGE_SIZE.lock().unwrap();
             *img_size = (img_original.cols(), img_original.rows());
+            let diagonal = ((img_original.cols() as f64).powi(2) + (img_original.rows() as f64).powi(2)).sqrt();
+            println!(
+                "Image size set to: {:?}, diagonal length: {}",
+                *img_size, diagonal
+            );
         }
         match mode {
             Mode::BgRemove => {
+                // 去背逻辑 出血+平滑+简化+去背
                 if cfgs.bleed > 0 {
-                    img_original =
-                        img_utils::bleed_edges(&img_original, &img_binary, cfgs.bleed as i32)
+                    img_original = img_utils::bleed_edges(&mut img_original, &img_binary, cfgs.bleed)
                             .map_err(|e| e.to_string())?;
-                    img_binary = img_utils::to_binary(&img_original, cfgs.threshold as f64)
+                    img_binary = img_utils::to_binary(&img_original, cfgs.threshold)
                         .map_err(|e| e.to_string())?;
                 }
-                img_utils::remove_background(&img_original, &img_binary, cfgs.is_delete_inner > 0)
-                    .map_err(|e| e.to_string())?;
+                if cfgs.smooth > 0 {
+                    img_binary = img_utils::smooth_edges(&img_binary, cfgs.smooth).map_err(|e| e.to_string())?;
+                }
+                if cfgs.simplify > 0 {
+                    img_binary = img_utils::simplify_contours_from_binary(&img_binary, cfgs.simplify as f64 / 1000.0)
+                        .map_err(|e| e.to_string())?;
+                }
                 // 执行背景移除逻辑
                 let img_final = img_utils::remove_background(
                     &img_original,
@@ -81,21 +91,21 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<String, String> {
                 // 全部轮廓描绘逻辑 平滑+填充孔洞+膨胀+获取轮廓+简化
                 // 1. 平滑
                 let img_smoothed = if cfgs.smooth > 0 {
-                    img_utils::smooth_edges(&img_binary, cfgs.smooth as i32)
+                    img_utils::smooth_edges(&img_binary, cfgs.smooth)
                         .map_err(|e| e.to_string())?
                 } else {
                     img_binary
                 };
                 // 2. 填充孔洞 (仅全部轮廓模式)
                 let img_filled = if matches!(mode, Mode::ContourAll) && cfgs.fill_holes > 0 {
-                    img_utils::fill_holes(&img_smoothed, cfgs.fill_holes as i32)
+                    img_utils::fill_holes(&img_smoothed, cfgs.fill_holes)
                         .map_err(|e| e.to_string())?
                 } else {
                     img_smoothed
                 };
                 // 3. 膨胀
                 let img_dilated = if cfgs.offset != 0 {
-                    img_utils::dilate_mask(&img_filled, cfgs.offset as i32)
+                    img_utils::dilate_mask(&img_filled, cfgs.offset)
                         .map_err(|e| e.to_string())?
                 } else {
                     img_filled

@@ -98,3 +98,5 @@ src-tauri/target/debug/assets/；
 5 svg to dxf 
 
 用python-svgpathtools ezdxf生成exe; 做tauri sidecar
+
+6 img.copy_to_masked(&mut mat, &mask) 通道数和img有关
