@@ -19,3 +19,18 @@
     color: #6dad56ff !important;
   }
 }
+
+.reload {
+  font-size: 19px;
+  &:hover {
+    // color: #6dad56ff !important;
+    cursor: pointer;
+  }
+  &.mouse-down {
+    color: #6dad56ff !important;
+  }
+  &.disabled {
+    color: rgba(0,0,0,0.25) !important;
+    cursor: not-allowed !important;
+  }
+}

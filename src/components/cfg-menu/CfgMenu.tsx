@@ -16,13 +16,20 @@ const initialCfgs: Record<string, number> = {
   fillHoles: 0,  
 }
 
-export default function CfgMenu() {
+interface CfgMenuProps {
+  btnState: boolean;
+  onChangeBtnState: (e: boolean) => void;
+}
+
+export default function CfgMenu(props: CfgMenuProps) {
   const [selectedMode, setSelectedMode] = useState<string>('bg_remove');
   const [cfgs, setCfgs] = useState<Record<string, number>>({
     ...initialCfgs
   });
   const [isShowCut, setIsShowCut] = useState<boolean>(false);
   const mySiteHref = "https://space.bilibili.com/619221106?spm_id_from=333.1007.0.0";
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+
 
   useEffect(() => {
     let unlisten: () => void;
@@ -56,13 +63,19 @@ export default function CfgMenu() {
 
   const handlePreview = async () => {
     // console.log("Previewing with settings:", cfgs);
+    props.onChangeBtnState(true);
+    setIsShowCut(true);
+    setIsProcessing(true);
     try {
       const res = await invoke<string>('solve', {mode: selectedMode, cfgs});
-      emit('img-changed', res);
+      await emit('img-changed', res);
     } catch (err) {
       console.error("Error during preview:", err);
       alert("预览失败");
     }
+    props.onChangeBtnState(false);
+    setIsShowCut(false);
+    setIsProcessing(false);
   }
 
   const handleLogoClick = () => {
@@ -131,9 +144,9 @@ export default function CfgMenu() {
         )
       }
       <li style={{width: "100%", marginTop: "auto", marginBottom: "7px", flexDirection: "column", alignItems: "flex-end", position: "relative"}}>
-        {isShowCut && <img src="/cut.png" alt="cut cut~" className='cut' height={60} style={{position: "absolute", left: 10, top: 42}}/>}
+        {isShowCut && <img src="/cut.png" alt="cut cut~" className={isProcessing ? "processing" : "cut"} height={60} style={{position: "absolute", left: 10, top: 42}}/>}
         <img className="logo" src="/icon.png" alt="Mr. Hungry" height={150} onMouseEnter={()=>{setIsShowCut(true);}} onMouseLeave={() => {setIsShowCut(false);}} onClick={handleLogoClick}/>
-        <Button color='cyan' variant="solid" size='large' style={{width: "100%", marginTop: "50px"}} onClick={handlePreview}>预览</Button>
+        <Button color='cyan' variant="solid" size='large' style={{width: "100%", marginTop: "50px"}} onClick={handlePreview} disabled={props.btnState}>预览</Button>
       </li>
     </ul>
   );

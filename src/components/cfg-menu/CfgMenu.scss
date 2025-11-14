@@ -28,7 +28,7 @@ ul {
   opacity: 0.5;
   cursor: pointer;
   &:hover {
-    animation: show-logo 0.3s ease-in-out forwards;
+    animation: show-logo 0.3s ease-in-out forwards ;
     @keyframes show-logo {
       0% {
         opacity: 0.5;
@@ -48,6 +48,20 @@ ul {
     }
     100% {
       opacity: 1;
+    }
+  }
+}
+.processing {
+  animation: processing-cut 1s linear infinite;
+  @keyframes processing-cut {
+    0% {
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
     }
   }
 }
