@@ -52,7 +52,7 @@ ul {
   }
 }
 .processing {
-  animation: processing-cut 1s linear infinite;
+  animation: processing-cut 0.5s linear infinite;
   @keyframes processing-cut {
     0% {
       opacity: 0;
@@ -64,4 +64,11 @@ ul {
       opacity: 0;
     }
   }
+}
+
+.w-110 {
+  width: 110px;
+}
+.mgr-10 {
+  margin-right: 10px;
 }

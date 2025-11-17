@@ -19,15 +19,16 @@ pub struct ImgSolveCfgs {
     smooth: i32,
     offset: i32,
     simplify: i32,
-    fill_holes: i32,
+    remove_noise_inner: i32,
+    remove_noise_outer: i32,
+    is_contain_inner: u8,
 }
 
 #[derive(serde::Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
     BgRemove,
-    ContourOuter,
-    ContourAll,
+    ExtractContour
 }
 
 #[tauri::command]
@@ -62,6 +63,9 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<String, String> {
                     img_binary = img_utils::to_binary(&img_original, cfgs.threshold)
                         .map_err(|e| e.to_string())?;
                 }
+                img_binary = img_utils::remove_noise(&img_binary, cfgs.remove_noise_inner, cfgs.remove_noise_outer, cfgs.is_delete_inner > 0)
+                        .map_err(|e| e.to_string())?;  
+
                 if cfgs.smooth > 0 {
                     img_binary = img_utils::smooth_edges(&img_binary, cfgs.smooth).map_err(|e| e.to_string())?;
                 }
@@ -72,13 +76,15 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<String, String> {
                 // 执行背景移除逻辑
                 let img_final = img_utils::remove_background(
                     &img_original,
-                    &img_binary,
-                    cfgs.is_delete_inner > 0,
+                    &img_binary
                 )
                 .map_err(|e| e.to_string())?;
                 // assert_eq!(img_final.channels(), 4, "错误：尝试编码一个非4通道的图像作为透明PNG！");
                 let temp_file_path = img_utils::export_temp_image(&file_name, &img_final)
                     .map_err(|e| e.to_string())?;
+
+                // let temp_file_path = img_utils::export_temp_image(&file_name, &img_binary)
+                //     .map_err(|e| e.to_string())?;
                 // 去背处理不提取轮廓，预览生成后，清空轮廓数
                 {
                     let mut stored_contours = CONTOURS.lock().unwrap();
@@ -86,7 +92,7 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<String, String> {
                 }
                 Ok(temp_file_path)
             }
-            Mode::ContourOuter | Mode::ContourAll => {
+            Mode::ExtractContour => {
                 // 外轮廓描绘逻辑 平滑+膨胀（偏移）+获取轮廓+简化
                 // 全部轮廓描绘逻辑 平滑+填充孔洞+膨胀+获取轮廓+简化
                 // 1. 平滑
@@ -96,13 +102,9 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<String, String> {
                 } else {
                     img_binary
                 };
-                // 2. 填充孔洞 (仅全部轮廓模式)
-                let img_filled = if matches!(mode, Mode::ContourAll) && cfgs.fill_holes > 0 {
-                    img_utils::fill_holes(&img_smoothed, cfgs.fill_holes)
-                        .map_err(|e| e.to_string())?
-                } else {
-                    img_smoothed
-                };
+                // 2. 降噪
+                let img_filled = img_utils::remove_noise(&img_smoothed, cfgs.remove_noise_inner, cfgs.remove_noise_outer, cfgs.is_delete_inner > 0)
+                        .map_err(|e| e.to_string())?;  
                 // 3. 膨胀
                 let img_dilated = if cfgs.offset != 0 {
                     img_utils::dilate_mask(&img_filled, cfgs.offset)
@@ -112,7 +114,7 @@ pub async fn solve(mode: Mode, cfgs: ImgSolveCfgs) -> Result<String, String> {
                 };
                 // 4. 获取轮廓
                 let contours =
-                    img_utils::find_contours(&img_dilated, matches!(mode, Mode::ContourAll))
+                    img_utils::find_contours(&img_dilated, cfgs.is_contain_inner > 0)
                         .map_err(|e| e.to_string())?;
                 // 5. 简化轮廓
                 let contours_simplified = if cfgs.simplify > 0 {

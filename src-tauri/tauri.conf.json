@@ -41,8 +41,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "bin/*",
-      "assets/*"
+      "assets/*",
+      "bin/*"
     ],
     "externalBin": [
       "bin/svg2dxf"

@@ -168,7 +168,76 @@ pub fn dilate_mask(src_binary: &Mat, expand_pixels: i32) -> Result<Mat> {
     Ok(dilated_mask)
 }
 
-/* 孔洞填充 */
+/* 去除外部噪点 (开运算) */
+pub fn clean_outer(src_binary: &Mat, kernel_size: i32) -> Result<Mat> {
+    let kernel = imgproc::get_structuring_element(
+        imgproc::MORPH_ELLIPSE, // 使用矩形或椭圆 MORPH_ELLIPSE 结构元素
+        Size::new(kernel_size, kernel_size),
+        Point::new(-1, -1), // 内核锚点，-1 表示中心
+    )?;
+
+    let mut cleaned_image = Mat::default();
+    imgproc::morphology_ex(
+        src_binary,
+        &mut cleaned_image,
+        imgproc::MORPH_OPEN, // 指定操作为“开运算”
+        &kernel,
+        Point::new(-1, -1),
+        1, // 迭代次数
+        core::BORDER_CONSTANT,
+        imgproc::morphology_default_border_value()?,
+    )?;
+    Ok(cleaned_image)
+}
+
+pub fn remove_noise_by_cc(src_binary: &Mat, min_area: i32) -> Result<Mat> {
+    let mut labels = Mat::default();
+    let mut stats = Mat::default();
+    let mut centroids = Mat::default();
+
+    // 连通域统计
+    let num_labels = imgproc::connected_components_with_stats(
+        src_binary,
+        &mut labels,
+        &mut stats,
+        &mut centroids,
+        8,
+        opencv::core::CV_32S,
+    )?;
+
+    // 输出 mask
+    let mut mask = Mat::zeros(src_binary.rows(), src_binary.cols(), opencv::core::CV_8U)?.to_mat()?;
+    // 遍历所有连通域
+    for i in 1..num_labels {
+        let area = *stats.at_2d::<i32>(i, imgproc::CC_STAT_AREA)?;
+
+        if area >= min_area {
+            // 保留区域
+            core::compare(&labels, &Mat::from_slice(&[i as i32])?, &mut mask, core::CMP_EQ)?;
+        }
+    }
+
+    Ok(mask)
+}
+
+pub fn remove_noise_median_blur(src_binary: &Mat, ksize: i32) -> Result<Mat> {
+    // // kernel_size 必须是大于1的奇数, e.g., 3, 5, 7
+    // let ksize = if kernel_size % 2 == 0 { kernel_size + 1 } else { kernel_size };
+    // let mut cleaned_image = Mat::default();
+    // imgproc::median_blur(src_binary, &mut cleaned_image, ksize)?;
+    // Ok(cleaned_image)
+
+        let k = if ksize % 2 == 0 { ksize + 1 } else { ksize };
+    // 使用 box filter 求邻域平均（结果为浮点或 0-255）
+    let mut blurred = Mat::default();
+    imgproc::blur(src_binary, &mut blurred, core::Size::new(k, k), core::Point::new(-1, -1), core::BORDER_DEFAULT)?;
+    // 阈值：如果平均值 > 127（相当于白像素超过一半）则为白，否则黑
+    let mut binary = Mat::default();
+    imgproc::threshold(&blurred, &mut binary, 127.0, 255.0, imgproc::THRESH_BINARY)?;
+    Ok(binary)
+}
+
+/* 孔洞填充 (闭运算) */
 pub fn fill_holes(src_binary: &Mat, size: i32) -> Result<Mat> {
     let kernel = imgproc::get_structuring_element(
         imgproc::MORPH_ELLIPSE,
@@ -187,6 +256,54 @@ pub fn fill_holes(src_binary: &Mat, size: i32) -> Result<Mat> {
         imgproc::morphology_default_border_value()?,
     )?;
     Ok(filled_image)
+}
+
+/* 清理二值图像：合并去噪点和孔洞填充 */
+pub fn remove_noise(
+    src_binary: &Mat,
+    hole_kernel_size: i32,
+    noise_kernel_size: i32,
+    is_delete_inner: bool
+) -> Result<Mat> {
+    // // 步骤1：去除外部噪点 (开运算)
+    // let noise_free = if noise_kernel_size > 0 {
+    //     clean_outer(src_binary, noise_kernel_size)?
+    // } else {
+    //     src_binary.clone()
+    // };
+
+    // // 步骤2：填充孔洞 (闭运算)
+    // let filled = if hole_kernel_size > 0 {
+    //     fill_holes(&noise_free, hole_kernel_size)?
+    // } else {
+    //     noise_free
+    // };
+
+    // Ok(filled)
+
+    // 步骤1：填充孔洞 (闭运算)
+    let mut filled = if hole_kernel_size > 0 {
+        fill_holes(src_binary, hole_kernel_size)?
+    } else {
+        src_binary.clone()
+    };
+    filled = if is_delete_inner {
+        filled
+    } else {
+        // 删除内轮廓时，直接使用原始二值图作为掩码; 保留外轮廓
+        let contours = find_contours(&filled, false)?; // 只找外轮廓
+        create_contours_filled_mask_by_contours(&contours, src_binary.size()?)?
+    };
+    // 步骤2：去除外部噪点 (开运算)
+    let noise_free = if noise_kernel_size > 0 {
+        // remove_noise_by_cc(&filled, noise_kernel_size)?
+        remove_noise_median_blur(&filled, noise_kernel_size)?
+        // clean_outer(&filled, noise_kernel_size)?
+    } else {
+        filled.clone()
+    };
+
+    Ok(noise_free)
 }
 
 /* 平滑边角 */
@@ -282,19 +399,21 @@ fn create_contours_filled_mask_by_contours(contours: &Vector<Vector<Point>>, img
 }
 
 // 去背
-pub fn remove_background(mat: &Mat, img_binary: &Mat, is_delete_inner: bool) -> Result<Mat> {
+pub fn remove_background(mat: &Mat, img_binary: &Mat) -> Result<Mat> {
     let mut transparent_bg =
         Mat::new_size_with_default(mat.size()?, core::CV_8UC4, Scalar::all(0.0))?;
     let mut bgra = Mat::default();
     imgproc::cvt_color(mat, &mut bgra, imgproc::COLOR_BGR2BGRA, 0)?;
-    if is_delete_inner {
-        // 删除内轮廓时，直接使用二值图作为掩码; 使用掩码复制 RGB 部分
+    // if is_delete_inner {
+    //     // 删除内轮廓时，直接使用二值图作为掩码; 使用掩码复制 RGB 部分
+    //     bgra.copy_to_masked(&mut transparent_bg, &img_binary)?;
+    // } else {
+    //     let mask = create_contours_filled_mask(img_binary)?;
+    //     // 使用掩码复制 RGB 部分
+    //     bgra.copy_to_masked(&mut transparent_bg, &mask)?;
+    // }
         bgra.copy_to_masked(&mut transparent_bg, &img_binary)?;
-    } else {
-        let mask = create_contours_filled_mask(img_binary)?;
-        // 使用掩码复制 RGB 部分
-        bgra.copy_to_masked(&mut transparent_bg, &mask)?;
-    }
+
     Ok(transparent_bg)
 }
 

@@ -13,7 +13,9 @@ const initialCfgs: Record<string, number> = {
   smooth: 0,
   offset: 0,
   simplify: 0,
-  fillHoles: 0,  
+  removeNoiseInner: 0, 
+  removeNoiseOuter: 0, 
+  isContainInner: 0, 
 }
 
 interface CfgMenuProps {
@@ -50,8 +52,8 @@ export default function CfgMenu(props: CfgMenuProps) {
 
   const modeOpts = [
     { label: '去背', value: 'bg_remove' },
-    { label: '外轮廓', value: 'contour_outer' },
-    { label: '全部轮廓', value: 'contour_all' },
+    { label: '提取轮廓', value: 'extract_contour' },
+    // { label: '全部轮廓', value: 'contour_all' },
   ];
 
   const handleCfgChange = (key: string, value: number) => {
@@ -95,58 +97,55 @@ export default function CfgMenu(props: CfgMenuProps) {
         <InputNumber min={0} max={255} value={Math.trunc(cfgs.threshold)} onChange={val => {handleCfgChange("threshold", val??0)}}/>
         <span>二值化阈值</span>
       </li>
+
+      <li>
+        <InputNumber min={0} max={100} value={Math.trunc(cfgs.smooth)} onChange={val => {handleCfgChange("smooth", val??0)}}/>
+        <span>平滑</span>
+      </li>
+      <li>
+        <InputNumber className="w-110 mgr-10" addonBefore="内" min={0}  max={100} value={Math.trunc(cfgs.removeNoiseInner)} onChange={val => {handleCfgChange("removeNoiseInner", val??0)}}/>
+        <InputNumber className="w-110" addonBefore="外" min={0}  max={100} value={Math.trunc(cfgs.removeNoiseOuter)} onChange={val => {handleCfgChange("removeNoiseOuter", val??0)}}/>
+        <span>降噪</span>
+      </li>
+      <li>
+        <InputNumber<number> defaultValue={0} min={0} max={1000} formatter={val => `${val}‰`} parser={val => Number(val?.replace("‰", "").trim() || 0)} onChange={val => {handleCfgChange("simplify", val??0)}}/>
+        <span>简化</span>
+      </li>
       {
-        selectedMode === 'bg_remove' && (
-          <>
-            <li>
-              <InputNumber min={0}  max={100} value={Math.trunc(cfgs.bleed)} onChange={val => {handleCfgChange("bleed", val??0)}}/>
-              <span>出血</span>
-            </li>
-            <li>
-              <InputNumber min={0} max={100} value={Math.trunc(cfgs.smooth)} onChange={val => {handleCfgChange("smooth", val??0)}}/>
-              <span>平滑</span>
-            </li>
-            <li>
-              <InputNumber<number> defaultValue={0} min={0} max={1000} formatter={val => `${val}‰`} parser={val => Number(val?.replace("‰", "").trim() || 0)} onChange={val => {handleCfgChange("simplify", val??0)}}/>
-              <span>简化</span>
-            </li>
-            <li>
-              <Checkbox style={{fontSize: "22px", display: "flex", alignItems: "center"}} 
-              checked={cfgs.isDeleteInner === 1} onChange={e => {handleCfgChange("isDeleteInner", e.target.checked ? 1 : 0)}}>去除内部</Checkbox>
-            </li>
-          </>
-        )
-      }
-      {
-        selectedMode !== 'bg_remove' && (
-          <>
-            <li>
-              <InputNumber min={0} max={255} value={Math.trunc(cfgs.smooth)} onChange={val => {handleCfgChange("smooth", val??0)}}/>
-              <span>平滑</span>
-            </li>
-            <li>
-              <InputNumber min={0} max={100} value={Math.trunc(cfgs.offset)} onChange={val => {handleCfgChange("offset", val??0)}}/>
-              <span>偏移</span>
-            </li>
-            <li>
-              <InputNumber<number> defaultValue={0} min={0} max={1000} formatter={val => `${val}‰`} parser={val => Number(val?.replace("‰", "").trim() || 0)} onChange={val => {handleCfgChange("simplify", val??0)}}/>
-              <span>简化</span>
-            </li>
-          </>
-        )
-      }
-      {
-        selectedMode === 'contour_all' && (
+        selectedMode === 'bg_remove' ? 
+        <>
           <li>
-            <InputNumber min={0}  max={100} value={Math.trunc(cfgs.fillHoles)} onChange={val => {handleCfgChange("fillHoles", val??0)}}/>
-            <span>孔洞填充</span>
+            <InputNumber min={0}  max={100} value={Math.trunc(cfgs.bleed)} onChange={val => {handleCfgChange("bleed", val??0)}}/>
+            <span>出血</span>
           </li>
-        )
+          <li>
+            <Checkbox style={{fontSize: "22px", display: "flex", alignItems: "center"}} 
+            checked={cfgs.isDeleteInner === 1} onChange={e => {handleCfgChange("isDeleteInner", e.target.checked ? 1 : 0)}}>去除内部</Checkbox>
+          </li>
+        </> :
+        <>
+          <li>
+            <InputNumber min={0} max={100} value={Math.trunc(cfgs.offset)} onChange={val => {handleCfgChange("offset", val??0)}}/>
+            <span>偏移</span>
+          </li>
+          <li>
+            <Checkbox style={{fontSize: "22px", display: "flex", alignItems: "center"}} 
+            checked={cfgs.isContainInner === 1} onChange={e => {handleCfgChange("isContainInner", e.target.checked ? 1 : 0)}}>含内轮廓</Checkbox>
+          </li> 
+        </>             
+      }
+      {
+        // selectedMode === 'contour_all' && (
+        //   <li>
+        //     <InputNumber min={0}  max={100} value={Math.trunc(cfgs.removeNoise)} onChange={val => {handleCfgChange("removeNoise", val??0)}}/>
+        //     <span>去噪</span>
+        //   </li>
+        // )
       }
       <li style={{width: "100%", marginTop: "auto", marginBottom: "7px", flexDirection: "column", alignItems: "flex-end", position: "relative"}}>
-        {isShowCut && <img src="/cut.png" alt="cut cut~" className={isProcessing ? "processing" : "cut"} height={60} style={{position: "absolute", left: 10, top: 42}}/>}
-        <img className="logo" src="/icon.png" alt="Mr. Hungry" height={150} onMouseEnter={()=>{setIsShowCut(true);}} onMouseLeave={() => {setIsShowCut(false);}} onClick={handleLogoClick}/>
-        <Button color='cyan' variant="solid" size='large' style={{width: "100%", marginTop: "50px"}} onClick={handlePreview} disabled={props.btnState}>预览</Button>
+        {isShowCut && <img src="/cut.png" alt="cut cut~" className={isProcessing ? "processing" : "cut"} height={50} style={{position: "absolute", left: 50, top: 38}}/>}
+        <img className="logo" src="/icon.png" alt="Mr. Hungry" height={120} onMouseEnter={()=>{setIsShowCut(true);}} onMouseLeave={() => {setIsShowCut(false);}} onClick={handleLogoClick}/>
+        <Button color='cyan' variant="solid" size='large' style={{width: "100%", marginTop: "30px"}} onClick={handlePreview} disabled={props.btnState}>预览</Button>
       </li>
     </ul>
   );
