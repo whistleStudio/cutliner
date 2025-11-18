@@ -97,15 +97,17 @@ export default function CfgMenu(props: CfgMenuProps) {
         <InputNumber min={0} max={255} value={Math.trunc(cfgs.threshold)} onChange={val => {handleCfgChange("threshold", val??0)}}/>
         <span>二值化阈值</span>
       </li>
-
+      <li>
+        <InputNumber  min={0}  max={100} value={Math.trunc(cfgs.removeNoiseInner)} onChange={val => {handleCfgChange("removeNoiseInner", val??0)}}/>
+        <span>内部填充</span>
+      </li>
+      <li>
+        <InputNumber  min={0}  max={100} value={Math.trunc(cfgs.removeNoiseOuter)} onChange={val => {handleCfgChange("removeNoiseOuter", val??0)}}/>
+        <span>胡椒降噪</span>
+      </li>
       <li>
         <InputNumber min={0} max={100} value={Math.trunc(cfgs.smooth)} onChange={val => {handleCfgChange("smooth", val??0)}}/>
         <span>平滑</span>
-      </li>
-      <li>
-        <InputNumber className="w-110 mgr-10" addonBefore="内" min={0}  max={100} value={Math.trunc(cfgs.removeNoiseInner)} onChange={val => {handleCfgChange("removeNoiseInner", val??0)}}/>
-        <InputNumber className="w-110" addonBefore="外" min={0}  max={100} value={Math.trunc(cfgs.removeNoiseOuter)} onChange={val => {handleCfgChange("removeNoiseOuter", val??0)}}/>
-        <span>降噪</span>
       </li>
       <li>
         <InputNumber<number> defaultValue={0} min={0} max={1000} formatter={val => `${val}‰`} parser={val => Number(val?.replace("‰", "").trim() || 0)} onChange={val => {handleCfgChange("simplify", val??0)}}/>
@@ -129,7 +131,7 @@ export default function CfgMenu(props: CfgMenuProps) {
             <span>偏移</span>
           </li>
           <li>
-            <Checkbox style={{fontSize: "22px", display: "flex", alignItems: "center"}} 
+            <Checkbox style={{fontSize: "21px", display: "flex", alignItems: "center"}} 
             checked={cfgs.isContainInner === 1} onChange={e => {handleCfgChange("isContainInner", e.target.checked ? 1 : 0)}}>含内轮廓</Checkbox>
           </li> 
         </>             
